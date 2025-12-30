@@ -1,0 +1,8 @@
+node_modules/
+.vector_db/
+vector_db/
+__pycache__/
+*.pyc
+data/*.pdf
+data/*.txt
+.env

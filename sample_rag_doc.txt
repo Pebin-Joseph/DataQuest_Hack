@@ -1,0 +1,7 @@
+This is a sample project brief for the Live RAG demo.
+The RAG system watches the data folder, indexes documents in real time, and answers questions.
+Key facts:
+- The backend runs FastAPI on port 8000.
+- The vector index is stored in Chroma at ./vector_db.
+- Models: llama3.2 for generation, nomic-embed-text for embeddings.
+- Citations include the document name and page number.
