@@ -1,7 +1,20 @@
-This is a sample project brief for the Live RAG demo.
-The RAG system watches the data folder, indexes documents in real time, and answers questions.
-Key facts:
-- The backend runs FastAPI on port 8000.
-- The vector index is stored in Chroma at ./vector_db.
-- Models: llama3.2 for generation, nomic-embed-text for embeddings.
-- Citations include the document name and page number.
+The Celestial Forge: A Comprehensive Analysis of Space and Technology
+Introduction: The Infinite Canvas
+Since the dawn of consciousness, humanity has looked upward, paralyzed and propelled by the silent majesty of the night sky. For millennia, the stars were the province of myth, navigation, and philosophy. It is only in the last century that we have forged the technological tools to bridge the gap between the Earth and the void. Space exploration is arguably the most challenging engineering endeavor our species has ever undertaken. It requires mastering energy, matter, and information at the absolute limits of physics. This text explores the history, the machinery, the commercial revolution, and the future of our journey into the cosmos.
+
+Chapter I: The Dawn of the Space Age
+The history of space technology is rooted in the geopolitical tension of the mid-20th century. The Cold War turned the vacuum of space into a theater of technological dominance.
+
+
+1.1 The Sputnik Shock and the Vostok Era
+On October 4, 1957, the Soviet Union launched Sputnik 1, a polished metal sphere the size of a beach ball. Its simple radio pulse changed the world, proving that humanity could place an object in orbit. This was quickly followed by Vostok 1 in 1961, which carried Yuri Gagarin, the first human to escape Earth’s gravity. These early feats were driven by Intercontinental Ballistic Missile (ICBM) technology—rockets originally designed for war were repurposed for exploration.
+
+
+1.2 The Apollo Miracle
+The United States responded with the Apollo program, a mobilization of resources unparalleled in history. The Saturn V rocket remains a marvel of engineering: a 363-foot behemoth generating 7.5 million pounds of thrust.
+
+The technology required to land on the Moon in 1969 was not just about raw power; it was about miniaturization. The Apollo Guidance Computer (AGC) was one of the first computers to use integrated circuits. With less processing power than a modern musical greeting card, it navigated astronauts across 240,000 miles of void, calculating orbital insertions and landing trajectories in real-time.
+
+Chapter II: The Pillars of Modern Space Technology
+To operate in space, engineers must solve four fundamental problems: getting there (propulsion), staying alive (life support), knowing where you are (navigation), and surviving the environment (materials science).
+

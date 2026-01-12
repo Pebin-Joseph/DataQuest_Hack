@@ -1,12 +1,13 @@
+````markdown
 # Live RAG Console (Pathway + Chroma + Ollama)
 
 A live-ingestion Retrieval-Augmented Generation stack with Pathway streaming to Chroma, Ollama for embeddings + generation, and a React/Vite frontend that cites doc sources.
 
-## 🎥 Demo (GitHub overlay)
-[![Watch the demo](docs/demo-thumb.png)](https://github.com/Pebin-Joseph/DataQuest_Hack/assets/PLACEHOLDER_DEMO_VIDEO)
+## 🎥 Demo video
+- Record a 2–3 minute screen recording following [docs/DEMO.md](docs/DEMO.md).
+- Upload the `.mp4` to your repo (recommended: GitHub Release asset), then paste the public URL here.
 
-- Replace `PLACEHOLDER_DEMO_VIDEO` with your uploaded GitHub asset URL (an `.mp4` plays inline/overlay on GitHub). 
-- Optionally add `docs/demo-thumb.png` as a thumbnail poster.
+Demo URL: <ADD_YOUR_VIDEO_URL_HERE>
 
 ## Features
 - Live Pathway file watcher (`/data`) → chunked ingestion → Chroma persistent collection (`vector_db`).
@@ -27,6 +28,22 @@ cd frontend
 npm install
 npm run dev -- --host  # Vite on http://localhost:5173
 ```
+
+## Live ingestion without any external API (recommended for demo)
+This repo includes a built-in simulator that continuously **adds, updates, and deletes** files inside the watched `data/` folder.
+
+Run everything:
+```bash
+docker compose up --build
+```
+
+The `simulator` container will create/update/delete files like `breaking_news.txt` every few seconds.
+This lets you demonstrate “Live AI” liveness without NewsAPI/GNews/etc.
+
+Tuning (optional) in `docker-compose.yml` (simulator env vars):
+- `SIM_MODE=scripted` (predictable add → update → delete) or `SIM_MODE=random`
+- `SIM_INTERVAL_S=15` (seconds between events)
+- `SIM_DELETE_PROB=0.15` (only used in random mode)
 
 ### Configure (optional)
 - `VITE_BACKEND_URL` in `frontend/.env` or shell (defaults to `http://localhost:8000`).
@@ -72,3 +89,6 @@ git push origin main
 
 ## License
 MIT (or your preferred license).
+
+````
+## Quick Start

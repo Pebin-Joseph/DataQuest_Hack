@@ -6,3 +6,12 @@ __pycache__/
 data/*.pdf
 data/*.txt
 .env
+
+# Demo artifacts / local media
+*.mp4
+*.mov
+*.mkv
+*.pdf
+
+# Old prototype (not part of main submission)
+Cleared Approach/

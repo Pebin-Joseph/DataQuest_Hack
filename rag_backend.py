@@ -2,13 +2,15 @@ import hashlib
 import json
 import os
 import threading
-from io import BytesIO
+import time as time_module
 from pathlib import Path
-from typing import List, Tuple, Dict
+from typing import List, Dict
 
 import pathway as pw
 import requests
-from fastapi import FastAPI
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import chromadb
@@ -18,111 +20,178 @@ from chromadb.errors import InvalidArgumentError
 # Parsing helpers
 # ------------
 
-def _parse_pdf_with_unstructured(content: bytes, filename: str) -> List[Tuple[str, int]]:
-    try:
-        from unstructured.partition.pdf import partition_pdf
-    except ImportError:
-        return []
-    elements = partition_pdf(file=BytesIO(content), include_page_breaks=True, strategy="hi_res")
-    chunks: List[Tuple[str, int]] = []
-    for el in elements:
-        page_num = getattr(el.metadata, "page_number", None) or 1
-        text = el.text.strip() if hasattr(el, "text") else ""
-        if text:
-            chunks.append((text, page_num))
-    return chunks
-
-def _parse_pdf_fallback(content: bytes, filename: str) -> List[Tuple[str, int]]:
-    try:
-        import pdfplumber
-    except ImportError:
-        return []
-    chunks: List[Tuple[str, int]] = []
-    with pdfplumber.open(BytesIO(content)) as pdf:
-        for i, page in enumerate(pdf.pages, start=1):
-            text = (page.extract_text() or "").strip()
-            if text:
-                chunks.append((text, i))
-    return chunks
-
 def parse_document(content: bytes, filepath: str) -> List[Dict[str, str]]:
     path_obj = Path(filepath)
-    name = path_obj.name
-    suffix = path_obj.suffix.lower()
+    name = (path_obj.name or "unknown").strip().strip('"').strip("'") or "unknown"
     rows: List[Dict[str, str]] = []
 
-    def chunk_text(text: str, chunk_size: int = 220, overlap: int = 60) -> List[str]:
+    def chunk_text(
+        text: str,
+        chunk_size_words: int = 120,
+        overlap_words: int = 30,
+        max_chars: int = 1200,
+    ) -> List[str]:
         words = text.split()
-        if not words:
-            return []
+        if len(words) <= 1:
+            step = max_chars - 200 if max_chars > 400 else max_chars
+            return [text[i : i + max_chars] for i in range(0, len(text), step) if text[i : i + max_chars].strip()]
+
         chunks = []
         start = 0
         while start < len(words):
-            end = start + chunk_size
+            end = start + chunk_size_words
             chunk = " ".join(words[start:end]).strip()
             if chunk:
+                if len(chunk) > max_chars:
+                    chunk = chunk[:max_chars]
                 chunks.append(chunk)
-            start = end - overlap
+            start = end - overlap_words
             if start < 0:
                 start = 0
         return chunks
 
-    if suffix == ".pdf":
-        pdf_chunks = _parse_pdf_with_unstructured(content, name)
-        if not pdf_chunks:
-            pdf_chunks = _parse_pdf_fallback(content, name)
-        for text, page in pdf_chunks:
-            for chunk in chunk_text(text):
-                rows.append({"text": chunk, "page": page, "doc": name})
-    else:
-        # Treat everything else as utf-8 text
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
         try:
-            text = content.decode("utf-8")
+            text = content.decode("utf-16", errors="ignore")
         except UnicodeDecodeError:
-            try:
-                text = content.decode("utf-16", errors="ignore")
-            except UnicodeDecodeError:
-                text = content.decode("latin-1", errors="ignore")
-        text = text.strip()
-        if text:
-            for chunk in chunk_text(text):
-                rows.append({"text": chunk, "page": 1, "doc": name})
+            text = content.decode("latin-1", errors="ignore")
+    text = text.strip()
+    if text:
+        for chunk in chunk_text(text):
+            rows.append({"text": chunk, "page": 1, "doc": name})
     return rows
 
 
 def _path_to_str(val) -> str:
     if isinstance(val, bytes):
         try:
-            return val.decode("utf-8", errors="ignore") or "unknown"
+            s = val.decode("utf-8", errors="ignore")
+            s = (s or "").strip().strip('"').strip("'")
+            return s or "unknown"
         except Exception:
             return "unknown"
     try:
-        return os.fspath(val)
+        s = os.fspath(val)
+        s = (s or "").strip().strip('"').strip("'")
+        return s or "unknown"
     except Exception:
-        return str(val) if val is not None else "unknown"
+        s = str(val) if val is not None else "unknown"
+        s = (s or "").strip().strip('"').strip("'")
+        return s or "unknown"
+
+
+def _row_field(row, key: str, default=None):
+    """Best-effort access for Pathway rows which can be dict-like or attribute-like."""
+    if row is None:
+        return default
+    try:
+        if isinstance(row, dict):
+            return row.get(key, default)
+    except Exception:
+        pass
+    try:
+        # Some Pathway row objects support __getitem__ but not .get
+        return row[key]
+    except Exception:
+        pass
+    try:
+        if hasattr(row, key):
+            return getattr(row, key)
+    except Exception:
+        pass
+    try:
+        getter = getattr(row, "get", None)
+        if callable(getter):
+            return getter(key, default)
+    except Exception:
+        pass
+    return default
 
 # ------------
 # Embedding + vector store helpers
 # ------------
 
 OLLAMA_EMBED_MODEL = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_GEN_MODEL = os.getenv("OLLAMA_GEN_MODEL", "llama3.2")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434").rstrip("/")
+OLLAMA_EMBED_TIMEOUT = int(os.getenv("OLLAMA_EMBED_TIMEOUT", "60"))
+OLLAMA_GEN_TIMEOUT = int(os.getenv("OLLAMA_GEN_TIMEOUT", "45"))
+OLLAMA_GEN_MAX_PREDICT = int(os.getenv("OLLAMA_GEN_MAX_PREDICT", "256"))
+OLLAMA_GEN_TEMPERATURE = float(os.getenv("OLLAMA_GEN_TEMPERATURE", "0.2"))
+OLLAMA_GEN_NUM_CTX = int(os.getenv("OLLAMA_GEN_NUM_CTX", "2048"))
 CHROMA_PATH = os.getenv("CHROMA_PATH", "vector_db")
 CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "live_docs")
+
+_http = requests.Session()
+_http.mount(
+    "http://",
+    HTTPAdapter(
+        max_retries=Retry(
+            total=2,
+            backoff_factor=0.3,
+            status_forcelist=(429, 502, 503, 504),
+            allowed_methods=("GET", "POST"),
+            raise_on_status=False,
+        )
+    ),
+)
+_http.mount(
+    "https://",
+    HTTPAdapter(
+        max_retries=Retry(
+            total=2,
+            backoff_factor=0.3,
+            status_forcelist=(429, 502, 503, 504),
+            allowed_methods=("GET", "POST"),
+            raise_on_status=False,
+        )
+    ),
+)
+
+# Track indexing activity so queries can reduce load while ingesting
+_INGESTING = threading.Event()
+_LAST_INGEST_TS = 0.0
+
+# Avoid multiple concurrent /api/generate calls (helps on CPU-only Ollama)
+_GEN_SEMAPHORE = threading.Semaphore(int(os.getenv("OLLAMA_GEN_CONCURRENCY", "1")))
 
 _client = chromadb.PersistentClient(path=CHROMA_PATH)
 _collection = _client.get_or_create_collection(CHROMA_COLLECTION, metadata={"hnsw:space": "cosine"})
 _expected_dim = None
+_CHROMA_LOCK = threading.Lock()
+
+# Best-effort cleanup for legacy ingests where path metadata could not be extracted.
+try:
+    with _CHROMA_LOCK:
+        _collection.delete(where={"doc": "unknown"})
+except Exception:
+    pass
 
 def embed_text(text: str) -> List[float]:
     payload = {"model": OLLAMA_EMBED_MODEL, "prompt": text}
-    try:
-        resp = requests.post(f"{OLLAMA_BASE_URL}/api/embeddings", json=payload, timeout=30)
-        resp.raise_for_status()
-        return resp.json().get("embedding", [])
-    except Exception:
-        # If the embed endpoint fails, skip embedding so ingestion continues.
-        return []
+    for attempt in range(1, 4):
+        try:
+            resp = _http.post(
+                f"{OLLAMA_BASE_URL}/api/embeddings",
+                json=payload,
+                timeout=(10, OLLAMA_EMBED_TIMEOUT),
+            )
+            resp.raise_for_status()
+            emb = resp.json().get("embedding", [])
+            if emb:
+                return emb
+            else:
+                print(
+                    f"EMBED_EMPTY attempt={attempt} model={OLLAMA_EMBED_MODEL} len={len(text)}"
+                )
+        except Exception as e:
+            print(
+                f"EMBED_FAIL attempt={attempt} model={OLLAMA_EMBED_MODEL} len={len(text)} err={e}"
+            )
+        time_module.sleep(0.25 * attempt)
+    return []
 
 
 def _get_expected_dim() -> int | None:
@@ -198,26 +267,47 @@ def make_chunk_id(doc: str, page: int, text: str) -> str:
     return digest.hexdigest()
 
 def sink_to_chroma(chunk_id: str, doc: str, page: int, text: str):
+    if len(text) > 1200:
+        print(
+            f"TRUNCATE chunk={chunk_id[:8]} doc={doc} page={page} from_len={len(text)} to=1200"
+        )
+        text = text[:1200]
+
     embedding = embed_text(text)
+    if not embedding:
+        # If Ollama embedding failed, skip this chunk to avoid Chroma auto-downloading a different model
+        print(f"SKIP_EMBED: no embedding for chunk={chunk_id[:8]} doc={doc} page={page} len={len(text)}")
+        return
+
     expected_dim = _get_expected_dim()
-    if embedding:
-        if expected_dim is None:
-            # Establish expected dimension from first successful embedding
-            expected_dim = len(embedding)
-            globals()["_expected_dim"] = expected_dim
-        if len(embedding) != expected_dim:
-            # Skip mismatched embeddings to avoid collection errors
-            return
+    if expected_dim is None:
+        # Establish expected dimension from first successful embedding
+        expected_dim = len(embedding)
+        globals()["_expected_dim"] = expected_dim
+    if len(embedding) != expected_dim:
+        # Skip mismatched embeddings to avoid collection errors
+        print(
+            f"SKIP_DIM: chunk={chunk_id[:8]} doc={doc} page={page} len={len(text)} "
+            f"embed_dim={len(embedding)} expected={expected_dim}"
+        )
+        return
+
     _metadata = {"doc": doc, "page": page}
     try:
-        _collection.upsert(
-            ids=[chunk_id],
-            documents=[text],
-            embeddings=[embedding] if embedding else None,
-            metadatas=[_metadata],
-        )
+        with _CHROMA_LOCK:
+            _collection.upsert(
+                ids=[chunk_id],
+                documents=[text],
+                embeddings=[embedding],
+                metadatas=[_metadata],
+            )
     except InvalidArgumentError:
         # Defensive: skip rows that still violate dimension or other schema issues
+        return
+    except Exception as e:
+        # Chroma can raise InternalError on some filesystems (e.g., disk I/O on bind mounts).
+        # Don't crash the ingestion thread; log and skip.
+        print(f"CHROMA_UPSERT_FAIL chunk={chunk_id[:8]} doc={doc} page={page} err={e}")
         return
 
 
@@ -239,24 +329,48 @@ def sink_ingest(row):
 
 class SinkIngestObserver(pw.io.python.ConnectorObserver):
     def on_change(self, key, row, time, is_addition):
-        if not is_addition:
-            return
-
-        metadata = row.get("_metadata", {}) or {}
-        if isinstance(metadata, dict):
-            path_val = metadata.get("path", "unknown")
-        else:
-            path_val = getattr(metadata, "path", "unknown")
+        # Pathway may surface file path either as a top-level `path` column
+        # or inside `_metadata.path` depending on version/connector.
+        path_val = _row_field(row, "path", "unknown")
+        if path_val in (None, "unknown"):
+            metadata = _row_field(row, "_metadata", {}) or {}
+            path_val = _row_field(metadata, "path", "unknown")
 
         path_val = _path_to_str(path_val)
         if path_val not in (None, "unknown"):
-            path_val = os.path.basename(path_val)
+            path_val = os.path.basename(path_val).strip().strip('"').strip("'")
 
-        data_bytes = row.get("data", b"") or b""
+        if not is_addition:
+            # Remove all chunks for this doc when the source file is deleted
+            try:
+                with _CHROMA_LOCK:
+                    _collection.delete(where={"doc": path_val})
+            except Exception:
+                pass
+            return
 
-        for chunk in parse_document(data_bytes, path_val):
-            cid = make_chunk_id(chunk["doc"], chunk["page"], chunk["text"])
-            sink_to_chroma(cid, chunk["doc"], chunk["page"], chunk["text"])
+        # If this is an update event, Pathway will still surface it as an addition.
+        # To avoid stale chunks lingering (old content still being retrieved),
+        # remove existing vectors for this doc before re-ingesting.
+        try:
+            with _CHROMA_LOCK:
+                _collection.delete(where={"doc": path_val})
+        except Exception:
+            pass
+
+        global _LAST_INGEST_TS
+        _INGESTING.set()
+        _LAST_INGEST_TS = time_module.time()
+
+        data_bytes = _row_field(row, "data", b"") or b""
+
+        try:
+            for chunk in parse_document(data_bytes, path_val):
+                cid = make_chunk_id(chunk["doc"], chunk["page"], chunk["text"])
+                sink_to_chroma(cid, chunk["doc"], chunk["page"], chunk["text"])
+        finally:
+            _LAST_INGEST_TS = time_module.time()
+            _INGESTING.clear()
 
 def build_pipeline(data_dir: str = "data"):
     files = pw.io.fs.read(data_dir, format="binary", mode="streaming", with_metadata=True)
@@ -342,22 +456,72 @@ def _generate_answer(question: str, context: str) -> str:
         "Cite doc name and page in parentheses when possible.\n\n"
         f"Context:\n{context}\n\nQuestion: {question}\nAnswer:"
     )
-    payload = {"model": "llama3.2", "prompt": prompt, "stream": False}
-    resp = requests.post(f"{OLLAMA_BASE_URL}/api/generate", json=payload, timeout=120)
-    resp.raise_for_status()
-    data = resp.json()
-    return data.get("response", "")
+    # If indexing is running, reduce generation size to improve responsiveness.
+    max_predict = 128 if _INGESTING.is_set() else OLLAMA_GEN_MAX_PREDICT
+    payload = {
+        "model": OLLAMA_GEN_MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "options": {
+            "temperature": OLLAMA_GEN_TEMPERATURE,
+            "num_predict": max_predict,
+            "num_ctx": OLLAMA_GEN_NUM_CTX,
+        },
+    }
+    try:
+        with _GEN_SEMAPHORE:
+            resp = _http.post(
+                f"{OLLAMA_BASE_URL}/api/generate",
+                json=payload,
+                timeout=(10, OLLAMA_GEN_TIMEOUT),
+            )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("response", "")
+    except requests.Timeout:
+        raise HTTPException(status_code=503, detail="LLM timeout: generation took too long")
+    except requests.RequestException as e:
+        raise HTTPException(status_code=503, detail=f"LLM request failed: {e}")
 
 @app.post("/query", response_model=QueryResponse)
 def query_endpoint(body: QueryRequest):
     k = max(1, min(body.k, 12))
     contexts, sources = _retrieve(body.question, k)
-    context_block = "\n\n".join(contexts) if contexts else ""
-    answer = _generate_answer(body.question, context_block)
+    if not contexts:
+        return {
+            "answer": "I cannot find that information in the documents.",
+            "sources": [],
+        }
+
+    context_block = "\n\n".join(contexts)
+    # Cap context to avoid oversized prompts hanging the LLM
+    if len(context_block) > 6000:
+        context_block = context_block[:6000]
+
+    try:
+        answer = _generate_answer(body.question, context_block)
+    except HTTPException:
+        # Pass through as-is so FastAPI returns the intended status/detail
+        raise
+    except Exception as e:
+        # Catch-all to prevent 500s on unexpected LLM errors
+        raise HTTPException(status_code=503, detail=f"LLM generate failed: {e}")
+
     return {"answer": answer, "sources": sources}
 
 @app.get("/health")
 def health():
+    ollama = {"ok": False}
+    try:
+        r = _http.get(f"{OLLAMA_BASE_URL}/api/version", timeout=(2, 2))
+        if r.ok:
+            v = r.json() if "application/json" in (r.headers.get("content-type") or "") else {}
+            ollama = {"ok": True, "version": v.get("version")}
+        else:
+            ollama = {"ok": False, "status_code": r.status_code}
+    except Exception as e:
+        ollama = {"ok": False, "error": str(e)}
+
     try:
         count = _collection.count()
     except Exception:
@@ -367,6 +531,9 @@ def health():
         "watching": os.path.abspath("data"),
         "collection_count": count,
         "expected_dim": _get_expected_dim(),
+        "ingesting": _INGESTING.is_set(),
+        "last_ingest_ts": _LAST_INGEST_TS,
+        "ollama": ollama,
     }
 
 # ------------

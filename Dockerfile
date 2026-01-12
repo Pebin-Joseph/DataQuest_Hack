@@ -9,7 +9,13 @@ RUN sed -i 's|http://deb.debian.org/debian|https://deb.debian.org/debian|g' /etc
   && sed -i 's|http://security.debian.org/debian-security|https://deb.debian.org/debian-security|g' /etc/apt/sources.list.d/debian.sources
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends build-essential poppler-utils ca-certificates \
+  && apt-get install -y --no-install-recommends \
+    build-essential \
+    poppler-utils \
+    ca-certificates \
+    tesseract-ocr \
+    libtesseract-dev \
+    libleptonica-dev \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy code and mount points
@@ -23,12 +29,14 @@ RUN PIP_NO_CACHE_DIR=1 pip install \
   --default-timeout=600 --retries 10 --use-deprecated=legacy-resolver \
   --trusted-host pypi.org --trusted-host files.pythonhosted.org \
   -i https://pypi.org/simple \
+  pillow==10.3.0 \
   fastapi==0.110.0 \
   uvicorn==0.23.2 \
   pathway==0.27.1 \
   chromadb==1.3.7 \
   unstructured==0.10.30 \
   pdfplumber==0.11.0 \
+  pytesseract==0.3.10 \
   requests==2.31.0
 
 ENV OLLAMA_BASE_URL=http://host.docker.internal:11434 \
