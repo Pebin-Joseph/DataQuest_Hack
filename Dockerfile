@@ -4,9 +4,15 @@ FROM python:3.11-slim-bookworm
 WORKDIR /app
 
 # System deps for PDF parsing
-# Switch apt sources to HTTPS to avoid 403s in some networks
-RUN sed -i 's|http://deb.debian.org/debian|https://deb.debian.org/debian|g' /etc/apt/sources.list.d/debian.sources \
-  && sed -i 's|http://security.debian.org/debian-security|https://deb.debian.org/debian-security|g' /etc/apt/sources.list.d/debian.sources
+# Switch apt sources to HTTPS to avoid 403s in some networks.
+# Debian images may use either /etc/apt/sources.list.d/debian.sources (new) or /etc/apt/sources.list (legacy).
+RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i 's|http://deb.debian.org/debian|https://deb.debian.org/debian|g' /etc/apt/sources.list.d/debian.sources; \
+      sed -i 's|http://security.debian.org/debian-security|https://security.debian.org/debian-security|g' /etc/apt/sources.list.d/debian.sources; \
+    else \
+      sed -i 's|http://deb.debian.org/debian|https://deb.debian.org/debian|g' /etc/apt/sources.list; \
+      sed -i 's|http://security.debian.org/debian-security|https://security.debian.org/debian-security|g' /etc/apt/sources.list; \
+    fi
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \

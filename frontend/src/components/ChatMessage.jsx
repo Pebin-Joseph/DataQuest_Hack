@@ -1,6 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { BookOpen, User, Bot, Hash } from "lucide-react";
+import { BookOpen, User, Bot } from "lucide-react";
 
 const ChatMessage = ({ role, text, sources }) => {
   const isUser = role === "user";
@@ -24,11 +24,6 @@ const ChatMessage = ({ role, text, sources }) => {
                 </div>
                 <div className="source-meta">
                   <span>p.{s.page || "?"}</span>
-                  {s.chunk_id && (
-                    <span className="chunk-id">
-                      <Hash size={12} /> {s.chunk_id.slice(0, 8)}
-                    </span>
-                  )}
                 </div>
               </div>
             ))}

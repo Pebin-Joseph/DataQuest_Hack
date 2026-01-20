@@ -1,6 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Sparkles, ShieldCheck, Cpu, Send, Loader2, Activity } from "lucide-react";
+import {
+  Sparkles,
+  ShieldCheck,
+  Cpu,
+  Send,
+  Loader2,
+  Activity,
+  Waves,
+  Database,
+  FolderOpen,
+} from "lucide-react";
 import ChatMessage from "./components/ChatMessage";
 import { StatusPill } from "./components/StatusPill";
 
@@ -76,51 +86,82 @@ const App = () => {
 
   return (
     <div className="app-shell">
-      <div className="sidebar">
-        <div className="pill-grid">
-          <StatusPill
-            label={`System: ${health.status === "online" ? "Online" : "Offline"}`}
-            sub={health.status === "online" ? "Pathway + Ollama" : "Check containers"}
-            type={health.status === "online" ? "online" : "offline"}
-          />
-          <StatusPill
-            label={`Watching: ${health.watching || "/data"}`}
-            sub="Streaming ingest"
-            type="watch"
-          />
-          <StatusPill
-            label={`Chunks: ${health.count ?? "--"}`}
-            sub="Chroma collection"
-            type="metric"
-          />
-        </div>
-        <div className="chip">
-          <Cpu size={14} /> Pathway ingestion + Chroma + Ollama (llama3.2)
-        </div>
-        <div className="chip">
-          <ShieldCheck size={14} /> Citations every answer
-        </div>
-        <div className="chip">
-          <Sparkles size={14} /> SIH-grade motion & polish
-        </div>
+      <div className="bg" aria-hidden="true">
+        <div className="bg-orb orb-1" />
+        <div className="bg-orb orb-2" />
+        <div className="bg-grid" />
       </div>
 
-      <div className="main">
-        <div className="hero">
-          <div>
-            <h1>Live RAG Console</h1>
-            <p>Real-time ingestion with Pathway, grounded answers with sources.</p>
+      <header className="topbar">
+        <div className="brand">
+          <div className="brand-mark">
+            <Waves size={18} />
+          </div>
+          <div className="brand-text">
+            <div className="brand-title">Live RAG Console</div>
+            <div className="brand-subtitle">Streaming ingestion • grounded answers • citations</div>
+          </div>
+        </div>
+
+        <div className="topbar-right">
+          <div className={`top-status ${health.status === "online" ? "ok" : "bad"}`}>
+            <span className="dot" />
+            {health.status === "online" ? "Online" : "Offline"}
           </div>
           <motion.div
-            animate={{ rotate: [0, 6, -6, 0], scale: [1, 1.05, 1.05, 1] }}
-            transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
-            className="badge"
+            animate={{ rotate: [0, 4, -4, 0] }}
+            transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
+            className="top-badge"
+            title="Live updates enabled"
           >
             <Sparkles size={14} /> Live
           </motion.div>
         </div>
+      </header>
 
-        <div className="chat-window">
+      <aside className="panel panel-left">
+        <div className="panel-title">System</div>
+        <div className="pill-grid">
+          <StatusPill
+            label={health.status === "online" ? "Backend online" : "Backend offline"}
+            sub={health.status === "online" ? "Pathway + Chroma + Ollama" : "Start Docker/Ollama"}
+            type={health.status === "online" ? "online" : "offline"}
+          />
+          <StatusPill label="Watching folder" sub={health.watching || "/data"} type="watch" />
+          <StatusPill
+            label="Indexed chunks"
+            sub={health.count === null ? "--" : String(health.count)}
+            type="metric"
+          />
+        </div>
+
+        <div className="panel-section">
+          <div className="mini-row">
+            <FolderOpen size={16} />
+            <div>
+              <div className="mini-title">Live ingestion</div>
+              <div className="mini-sub">Files added/updated/deleted are reflected automatically.</div>
+            </div>
+          </div>
+          <div className="mini-row">
+            <Database size={16} />
+            <div>
+              <div className="mini-title">Vector store</div>
+              <div className="mini-sub">Chroma persistent collection with doc/page metadata.</div>
+            </div>
+          </div>
+          <div className="mini-row">
+            <ShieldCheck size={16} />
+            <div>
+              <div className="mini-title">Grounded answers</div>
+              <div className="mini-sub">Responses are restricted to retrieved context.</div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <main className="panel panel-main">
+        <div className="chat-window" role="log" aria-live="polite">
           {messages.map((m, idx) => (
             <ChatMessage key={idx} role={m.role} text={m.text} sources={m.sources} />
           ))}
@@ -137,9 +178,9 @@ const App = () => {
           )}
         </div>
 
-        <div className="form">
+        <div className="composer">
           <textarea
-            placeholder="Ask anything about the docs..."
+            placeholder="Ask about the latest docs… (Enter to send, Shift+Enter for newline)"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -149,24 +190,29 @@ const App = () => {
               }
             }}
           />
-          <div className="controls">
+          <div className="composer-bar">
             <div className="control-row">
-              <label htmlFor="k-slider">Depth (k): {k}</label>
-              <input
-                id="k-slider"
-                type="range"
-                min="2"
-                max="12"
-                value={k}
-                onChange={(e) => setK(Number(e.target.value))}
-              />
+              <label htmlFor="k-slider">Retrieval depth</label>
+              <div className="range-wrap">
+                <input
+                  id="k-slider"
+                  type="range"
+                  min="2"
+                  max="12"
+                  value={k}
+                  onChange={(e) => setK(Number(e.target.value))}
+                />
+                <div className="range-value">k={k}</div>
+              </div>
             </div>
-            <button onClick={ask} disabled={loading}>
+
+            <button className="primary" onClick={ask} disabled={loading}>
               {loading ? <Loader2 className="spin" size={18} /> : <Send size={18} />}
-              &nbsp;Ask
+              Ask
             </button>
-            <div className="form-meta">
-              <span className="inline-metric">
+
+            <div className="composer-meta">
+              <span className="inline-metric" title="Last request latency">
                 <Activity size={14} /> {latencyMs ? `${latencyMs} ms` : "--"}
               </span>
               {lastError && <span className="inline-error">{lastError}</span>}
@@ -175,9 +221,28 @@ const App = () => {
         </div>
 
         <div className="hint-row">
-          <span>Tips: ask specific intents ("summarize section X"), mention doc names, or increase depth.</span>
+          <Cpu size={14} />
+          <span>
+            Tip: mention a doc name, or ask for a specific summary. Increase <b>k</b> for broader recall.
+          </span>
         </div>
-      </div>
+      </main>
+
+      <aside className="panel panel-right">
+        <div className="panel-title">Demo</div>
+        <div className="chip">
+          <Sparkles size={14} /> Live add/update/delete simulator supported
+        </div>
+        <div className="chip">
+          <Database size={14} /> Persistent vectors (Docker volume)
+        </div>
+        <div className="chip">
+          <ShieldCheck size={14} /> Source cards show doc + page
+        </div>
+        <div className="chip subtle">
+          <Activity size={14} /> Try: “When is Product Alpha launching, and was there any correction?”
+        </div>
+      </aside>
     </div>
   );
 };
