@@ -2,7 +2,7 @@
 
 A live-ingestion Retrieval-Augmented Generation stack with Pathway streaming into Chroma, Ollama for embeddings + generation, and a React/Vite frontend that cites sources.
 
-## 🎥 Demo video
+##  Demo video
 - Record a 2–3 minute screen recording following [docs/DEMO.md](docs/DEMO.md).
 - Upload the `.mp4` somewhere accessible (recommended: GitHub Release asset), then paste the public URL here.
 
@@ -78,4 +78,4 @@ Tuning (optional) in [docker-compose.yml](docker-compose.yml) (simulator env var
 - Frontend errors: ensure `VITE_BACKEND_URL` matches backend host/port.
 
 ## License
-MIT (or your preferred license).
+MIT 
